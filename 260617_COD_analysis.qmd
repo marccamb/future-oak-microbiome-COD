@@ -1,0 +1,78 @@
+---
+title: "Add a title"
+author: "Marine C. Cambon"
+date: last-modified
+published-title: "document last compilation"
+format:
+  html:
+    theme: 
+      light: minty
+      dark: slate
+    linestretch: 1.7
+    toc: true
+    toc-location: left
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+    link-external-newwindow: true
+    # comments:
+    #   hypothesis: true
+editor: source
+#bibliography: documentation/references.bib
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+rm(list = ls())
+graph_par <- c(las=1, bty="l", col.axis="gray30")
+```
+
+```{r, eval=F}
+# Optional loading of my homemade functions from gitlab. 
+# Change chunk option to eval = T if needed
+# -----------------------------------------------------------------------------
+
+## Read Cerillo measurements
+## .........................
+
+# Clone the function from GitLab to have an up-to-date version
+if(!file.exists("src/read_cerillo_stratus")) {
+system2(
+  command = "git",
+  args = c("clone", 
+           "git@github.com:marccamb/read_cerillo_stratus.git src/read_cerillo_stratus")
+)
+} else {
+  system("git -C src/read_cerillo_stratus pull")
+}
+# Load the function 
+purrr::walk(list.files("src/read_cerillo_stratus/src/",
+                       pattern="*.R", full.names = T), 
+            source)
+
+
+## Plate map management
+## ....................
+
+# Clone the function from GitLab to have an up-to-date version
+if(!file.exists("src/generate_plate_maps")) {
+system("git clone git@github.com:marccamb/generate_plate_maps.git src/generate_plate_maps")
+} else {
+  system("git -C src/generate_plate_maps pull")
+}
+# Load the function 
+purrr::walk(list.files("src/generate_plate_maps/",pattern="*.R", full.names = T), source)
+```
+
+## Objective
+
+## Session info
+
+<div style="height:300px;overflow:auto;">
+```{r}
+sessioninfo::session_info()
+```
+</div>
+
+
