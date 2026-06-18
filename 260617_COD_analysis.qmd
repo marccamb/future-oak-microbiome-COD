@@ -1,5 +1,5 @@
 ---
-title: "Add a title"
+title: "Future Oak: AOD and COD comparison"
 author: "Marine C. Cambon"
 date: last-modified
 published-title: "document last compilation"
@@ -26,46 +26,254 @@ editor_options:
 ```{r}
 rm(list = ls())
 graph_par <- c(las=1, bty="l", col.axis="gray30")
-```
+hue_tissue <- c("Leaf" = "olivedrab3", "Stem" = "bisque2", "Soil" = "salmon4")
+pdf_out <- TRUE
+# Load custom functions from src
+purrr::walk(list.files("src", pattern = ".R", full.names = T), source)
+# renv::activate()
 
-```{r, eval=F}
-# Optional loading of my homemade functions from gitlab. 
-# Change chunk option to eval = T if needed
-# -----------------------------------------------------------------------------
-
-## Read Cerillo measurements
-## .........................
-
-# Clone the function from GitLab to have an up-to-date version
-if(!file.exists("src/read_cerillo_stratus")) {
-system2(
-  command = "git",
-  args = c("clone", 
-           "git@github.com:marccamb/read_cerillo_stratus.git src/read_cerillo_stratus")
-)
-} else {
-  system("git -C src/read_cerillo_stratus pull")
-}
-# Load the function 
-purrr::walk(list.files("src/read_cerillo_stratus/src/",
-                       pattern="*.R", full.names = T), 
-            source)
-
-
-## Plate map management
-## ....................
-
-# Clone the function from GitLab to have an up-to-date version
-if(!file.exists("src/generate_plate_maps")) {
-system("git clone git@github.com:marccamb/generate_plate_maps.git src/generate_plate_maps")
-} else {
-  system("git -C src/generate_plate_maps pull")
-}
-# Load the function 
-purrr::walk(list.files("src/generate_plate_maps/",pattern="*.R", full.names = T), source)
+# Loading a few packages
+library(phyloseq)
+suppressMessages(library(dplyr))
 ```
 
 ## Objective
+
+Compare the microbiome of trees with AOD, trees with COD and healthy trees.
+The two sites where we have COD samples are Moccas (MOCCA) and Southwick (STHWK)
+
+## Data loading
+
+:::{.callout-important}
+### Data filtering and processing
+- Only keeping Moccas and Southwick microbiome samples
+- removed ASVs with not at least 50 reads (bacteria) or 100 reads (fungi) in one sample
+- removed samples with less than 100 reads
+- removed ASVs that were not Bacteria or Fungi (including Chloroplasts and Mitochondria)
+- updated the 16S taxonomic assignation with GDTP phylogenetic placement
+:::
+
+```{r}
+#| label: load_data
+
+site_metadata <- read.csv("data/site_metadata.csv")
+
+ps_tot <- purrr::map2(
+  c(
+    "data/FO_16S_Phyloseq_unfiltered.rds",
+    "data/FO_ITS_Phyloseq_unfiltered.rds"
+  ),
+  c(50, 100),
+  \(rds, threshold) {
+    ps <- readRDS(rds) |>
+      # filtering out spurious ASVs
+      subset_taxa(Kingdom %in% c("Fungi", "Bacteria")) |>
+      subset_taxa(Order != "Chloroplast") |>
+      subset_taxa(Family != "Mitochondria") |>
+      filter_taxa(\(x) any(x > threshold), prune = TRUE) |>
+      {
+        \(x) prune_samples(sample_sums(x) >= 100, x)
+      }()
+    ps <- prune_samples(
+      sample_data(ps)$SampleType == "Sample" &
+        sample_data(ps)$SampleOrigin == "Microbiome" &
+        sample_data(ps)$Site %in% c("MOCCA", "STHWK") &
+        is.na(sample_data(ps)$IsolationMethod),
+      ps
+    )
+    sample_data(ps)$disease_tissue <- paste(
+      sample_data(ps)$Disease,
+      sample_data(ps)$Tissue,
+      sep = "_"
+    )
+    sample_data(ps)$site_tissue <- paste(
+      sample_data(ps)$Site,
+      sample_data(ps)$Tissue
+    )
+    sample_data(ps) <- cbind(
+      sample_data(ps),
+      site_metadata[match(sample_data(ps)$Site, site_metadata$Site), -1]
+    )
+    return(ps)
+  }
+)
+names(ps_tot) <- c("bacteria", "fungi")
+```
+
+Swapping the 16S taxonomic assignation with the `phyloplace` output from the [`nf-core/ampliseq` pipeline](https://nf-co.re/ampliseq/2.6.1/).
+
+```{r}
+#| label: fix_bacteria_taxo
+phylo_tax <- read.table("data/asvs.taxonomy.sativa.tsv", sep = "\t")
+names(phylo_tax) <- c("ASV_ID", "Lineage", "Support")
+
+phylo_tax <- phylo_tax |>
+  mutate(
+    Kingdom = stringr::str_extract(Lineage, "d__([[:alnum:]]+)\\;?", group = 1),
+    Phylum = stringr::str_extract(Lineage, "p__([[:alnum:]_-]+)\\;?", group = 1),
+    Class = stringr::str_extract(Lineage, "c__([[:alnum:]_-]+)\\;?", group = 1),
+    Order = stringr::str_extract(Lineage, "o__([[:alnum:]_-]+)\\;?", group = 1),
+    Family = stringr::str_extract(Lineage,"f__([[:alnum:]_-]+)\\;?",group = 1),
+    Genus = stringr::str_extract(Lineage, "g__([[:alnum:]_-]+)\\;?", group = 1),
+    Species = stringr::str_extract(Lineage,"s__([[:alnum:]_-]+ [[:alnum:]_-]+)",group = 1)
+  ) |>
+  select(ASV_ID, Kingdom:Species) |>
+  filter(ASV_ID %in% taxa_names(ps_tot$bacteria)) |>
+  as.matrix()
+rownames(phylo_tax) <- phylo_tax[,"ASV_ID"]
+phylo_tax <- phylo_tax[,-1]
+
+tax_table(ps_tot$bacteria) <- tax_table(phylo_tax[taxa_names(ps_tot$bacteria),])
+```
+
+Then I am splitting the datasets per tissue to ease the following analysis
+
+```{r}
+#| label: split_tissue_disease
+levels_tissue <- sample_data(ps_tot$bacteria)$Tissue |>
+  unique() |>
+  sort()
+
+levels_tissue_disease <- sample_data(ps_tot$bacteria)$disease_tissue |>
+  unique() |>
+  sort()
+
+ps_16S_tissue <-
+  purrr::set_names(levels_tissue) |>
+  purrr::map(function(l) {
+    to_keep <- sample_data(ps_tot$bacteria)$Tissue == l
+    prune_samples(to_keep, ps_tot$bacteria)
+  })
+
+ps_16S_tissue_disease <-
+  purrr::set_names(levels_tissue_disease) |>
+  purrr::map(function(l) {
+    to_keep <- sample_data(ps_tot$bacteria)$disease_tissue == l
+    prune_samples(to_keep, ps_tot$bacteria)
+  })
+
+ps_ITS_tissue <-
+  purrr::set_names(levels_tissue) |>
+  purrr::map(function(l) {
+    to_keep <- sample_data(ps_tot$fungi)$Tissue == l
+    prune_samples(to_keep, ps_tot$fungi)
+  })
+
+ps_ITS_tissue_disease <-
+  purrr::set_names(levels_tissue_disease) |>
+  purrr::map(function(l) {
+    to_keep <- sample_data(ps_tot$fungi)$disease_tissue == l
+    prune_samples(to_keep, ps_tot$fungi)
+  })
+```
+
+:::{.panel-tabset}
+
+### 16S dataset summary
+
+```{r}
+#| label: full_bacteria_table
+#| results: 'asis'
+res <- purrr::imap(ps_16S_tissue_disease, function(x, i) {
+  phyloseq_summary_table(x, name = i)
+}) |>
+  bind_rows()
+
+res |>
+  knitr::kable(col.names = gsub("\\.", " ", names(res)))
+```
+
+### ITS dataset summary
+
+```{r}
+#| label: full_fungi_table
+#| results: 'asis'
+res <- purrr::imap(ps_ITS_tissue_disease, function(x, i) {
+  phyloseq_summary_table(x, name = i)
+}) |>
+  bind_rows()
+
+res |>
+  knitr::kable(col.names = gsub("[\\.X]", " ", names(res)))
+```
+
+:::
+
+### Exporting ASV tables
+
+```{r}
+#| label: export_asv_tables
+
+ps_tot |>
+  purrr::iwalk(function(ps, i) {
+    asv_tab <- ps |>
+      phyloseq::otu_table() |>
+      as.data.frame() |>
+      tibble::rownames_to_column("ASV_ID")
+    asv_sha <- asv_tab$ASV_ID
+    asv_tab$ASV_ID <- paste0("ASV_", seq_along(asv_sha))
+
+    tax_tab <- ps |>
+      phyloseq::tax_table() |>
+      as.data.frame() |>
+      tibble::rownames_to_column("ASV_sha")
+    
+    tax_tab <- tax_tab |>
+      tibble::add_column(
+        "ASV_ID" = asv_tab$ASV_ID[match(tax_tab$ASV_sha, asv_sha)],
+        .before = 1
+      )
+    sample_tab <- ps |>
+      phyloseq::sample_data() |>
+      data.frame() |>
+      tibble::rownames_to_column("SampleID")
+
+    write.csv(
+      asv_tab,
+      paste0("data/FO_COD_", i, "_ASV_table.csv"),
+      row.names = FALSE
+    )
+
+    write.csv(
+      tax_tab,
+      paste0("data/FO_COD_", i, "_tax_table.csv"),
+      row.names = FALSE
+    )
+
+    write.csv(
+      sample_tab,
+      paste0("data/FO_COD_", i, "_sample_table.csv"),
+      row.names = FALSE
+    )
+  })
+```
+
+## Ordination plots (for Moccas samples only)
+
+::: {.panel-tabset}
+
+```{r}
+#| label: ordination_plots
+#| fig-cap: "Ordination plots of the microbiome samples from trees with AOD, COD and healthy trees. The ordination is based on Bray-Curtis dissimilarity and PCoA. The samples are colored by disease status (Healthy, AOD, COD)."
+#| results: 'asis'
+
+library(ggplot2)
+
+purrr::iwalk(list(bacteria = ps_16S_tissue, fungi = ps_ITS_tissue), \(ps_list, marker) {
+  purrr::iwalk(ps_list, \(ps_tissue, t) {
+    ps_tissue <- prune_samples(sample_data(ps_tissue)$Site == "MOCCA", ps_tissue)
+    ps.ord <- ordinate(ps_tissue, "PCoA", "bray")
+    pord <- plot_ordination(ps_tissue, ps.ord, type = "samples", color = "Disease")
+    
+    cat('### ', paste(t, marker), '\n\n')
+    print(pord + geom_point(size = 5) + ggtitle(paste(t, marker)))
+    cat('\n\n')
+  })
+})
+
+```
+
+:::
 
 ## Session info
 
