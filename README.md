@@ -3,6 +3,7 @@
 This repository contains a subset of data from the Future Oak project, focussing on the comparision of trees with AOD and COD, at two sites (MOCCA and STHWK). It also includes a brief analysis of alpha and beta diversity of these tree microbiomes.
 
 ## Structure
+```
 ├── data/
 │ ├── FO_16S_Phyloseq_unfiltered.rds # Processed phyloseq objects
 │ ├── FO_ITS_Phyloseq_unfiltered.rds # Processed phyloseq objects
@@ -18,6 +19,7 @@ This repository contains a subset of data from the Future Oak project, focussing
 ├── 260617_COD_analysis.html # Report output with basic alpha and beta diversity analysis
 ├── renv.lock # {renv} lockfile which can be use to restore all package versions
 └── README.md
+```
 
 ## Requirements
 
