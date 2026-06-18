@@ -27,6 +27,8 @@ editor_options:
 rm(list = ls())
 graph_par <- c(las=1, bty="l", col.axis="gray30")
 hue_tissue <- c("Leaf" = "olivedrab3", "Stem" = "bisque2", "Soil" = "salmon4")
+hue_disease <- c("Control" = "#abdda4", "DiseaseAOD" = "#d53e4f", "DiseaseCOD" = "#fdae61")
+
 pdf_out <- TRUE
 # Load custom functions from src
 purrr::walk(list.files("src", pattern = ".R", full.names = T), source)
@@ -266,11 +268,40 @@ purrr::iwalk(list(bacteria = ps_16S_tissue, fungi = ps_ITS_tissue), \(ps_list, m
     pord <- plot_ordination(ps_tissue, ps.ord, type = "samples", color = "Disease")
     
     cat('### ', paste(t, marker), '\n\n')
-    print(pord + geom_point(size = 5) + ggtitle(paste(t, marker)))
+    print(pord + geom_point(size = 5, aes(color = Disease)) + 
+      scale_color_manual(values = hue_disease) +
+      theme_bw() +
+      ggtitle(paste(t, marker)))
     cat('\n\n')
   })
 })
 
+```
+
+:::
+
+## Alpha diversity analysis (for Moccas samples only)
+
+::: {.panel-tabset}
+
+```{r}
+#| label: alpha_diversity
+#| results: 'asis'
+
+purrr::iwalk(list(bacteria = ps_16S_tissue, fungi = ps_ITS_tissue), \(ps_list, marker) {
+  purrr::iwalk(ps_list, \(ps_tissue, t) {
+    ps_sub <- prune_samples(sample_data(ps_tissue)$Site == "MOCCA", ps_tissue)
+    p <- plot_richness(ps_sub, x = "Disease", color = "Disease", measures = c("Chao1", "Shannon")) +
+      geom_boxplot(alpha = 0.5, aes(fill = Disease)) +
+      scale_color_manual(values = hue_disease) +
+      scale_fill_manual(values = hue_disease) +
+      theme_bw() +
+      ggtitle(paste(marker, t, "samples"))
+    cat("### ", paste(t, marker), "\n\n")
+    print(p)
+    cat("\n\n")
+  })
+})
 ```
 
 :::
